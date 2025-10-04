@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agenda & Calendar</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <div class="toolbar">
+        <button
+          type="button"
+          id="open-tags"
+          class="toolbar-manage-btn"
+          aria-haspopup="true"
+          aria-controls="tag-drawer"
+          aria-expanded="false"
+        >
+          Manage Tags
+        </button>
+        <div class="filters">
+          <label class="search-field">
+            <span>Search</span>
+            <input type="search" id="filter-search" placeholder="Find events" />
+          </label>
+          <div id="filter-tags" class="filter-tags" aria-label="Filter by tag"></div>
+        </div>
+      </div>
+      <section class="agenda">
+        <h1>Agenda</h1>
+        <form id="agenda-form">
+          <label>
+            Date
+            <input type="date" id="event-date" required />
+          </label>
+          <label>
+            Start Time
+            <input type="time" id="event-start" />
+          </label>
+          <label>
+            End Time
+            <input type="time" id="event-end" />
+          </label>
+          <label>
+            Event
+            <input type="text" id="event-title" placeholder="What needs to happen?" required />
+          </label>
+          <label>
+            Location
+            <input type="text" id="event-location" placeholder="Where is it?" />
+          </label>
+          <label>
+            Notes
+            <textarea id="event-notes" rows="3" placeholder="Add details (optional)"></textarea>
+          </label>
+          <fieldset class="tag-fieldset">
+            <legend>Tags</legend>
+            <div id="event-tags" class="tag-options"></div>
+          </fieldset>
+          <div class="form-actions">
+            <button type="submit" id="submit-button">Add</button>
+            <button type="button" id="cancel-edit" hidden>Cancel</button>
+          </div>
+        </form>
+        <ul id="agenda-items" aria-live="polite"></ul>
+      </section>
+
+      <section class="calendar">
+        <div class="calendar-header">
+          <button type="button" id="prev-month" aria-label="Previous month">‹</button>
+          <h2 id="calendar-title"></h2>
+          <button type="button" id="next-month" aria-label="Next month">›</button>
+        </div>
+        <div class="calendar-grid" id="calendar-grid" aria-label="Calendar grid"></div>
+      </section>
+
+      <section class="upcoming" aria-live="polite">
+        <h2>This Week</h2>
+        <ul id="upcoming-items"></ul>
+      </section>
+    </main>
+    <aside class="tag-drawer" id="tag-drawer" aria-hidden="true">
+      <div class="tag-drawer__header">
+        <h2>Tags</h2>
+        <button type="button" id="close-tags" aria-label="Close tag manager">×</button>
+      </div>
+      <form id="tag-form" class="tag-form">
+        <label>
+          New tag name
+          <input type="text" id="tag-name" placeholder="e.g. Work" required />
+        </label>
+        <label>
+          Tag color
+          <input type="color" id="tag-color" value="#6366f1" />
+        </label>
+        <div class="tag-form__actions">
+          <button type="submit">Add Tag</button>
+        </div>
+      </form>
+      <ul id="tag-list" class="tag-list" aria-live="polite"></ul>
+    </aside>
+    <div class="tag-overlay" id="tag-overlay" hidden></div>
+    <div class="day-overlay" id="day-overlay" hidden></div>
+    <div class="day-modal" id="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title" hidden>
+      <div class="day-modal__header">
+        <h3 id="day-modal-title"></h3>
+        <button type="button" id="close-day-modal" aria-label="Close day details">×</button>
+      </div>
+      <ul id="day-modal-list" class="day-modal__list" aria-live="polite"></ul>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
