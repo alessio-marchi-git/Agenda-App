@@ -3,9 +3,8 @@
 Applicazione web single-page per pianificare eventi quotidiani, visualizzarli in un'agenda filtrabile e mantenere il controllo del calendario settimanale e mensile. Tutto è salvato in locale, senza dipendenze da backend, così da poter usare il tool offline o integrarlo in un progetto esistente.
 
 ## Screenshot
-![Anteprima dell'Agenda App](docs/screenshots/agenda-overview.png "Sostituisci con uno screenshot reale dell'interfaccia")
-
-> L'immagine inclusa è un segnaposto 800×600. Sostituiscila con uno screenshot reale salvando il file con lo stesso nome in `docs/screenshots/`.
+![Schermata iniziale dell'agenda](screenshots/home1.png "Vista generale con agenda, calendario e drawer tag")
+![Gestione dettagli evento](screenshots/home2.png "Modifica di un evento con tag e note personalizzate")
 
 ## Funzionalità principali
 - Creazione e modifica di eventi con data, fascia oraria, luogo, note e tag colorati
