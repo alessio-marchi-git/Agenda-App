@@ -3,26 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f4f4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="icons/icon-192.svg" />
     <title>Agenda & Calendar</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <a href="#agenda-form" class="skip-link">Skip to content</a>
     <main class="layout">
       <div class="toolbar">
-        <button
-          type="button"
-          id="open-tags"
-          class="toolbar-manage-btn"
-          aria-haspopup="true"
-          aria-controls="tag-drawer"
-          aria-expanded="false"
-        >
-          Manage Tags
-        </button>
+        <div class="toolbar-actions">
+          <button
+            type="button"
+            id="open-tags"
+            class="toolbar-manage-btn"
+            aria-haspopup="true"
+            aria-controls="tag-drawer"
+            aria-expanded="false"
+          >
+            Manage Tags
+          </button>
+          <button type="button" id="export-data" class="toolbar-data-btn" aria-label="Export data">Export</button>
+          <button type="button" id="import-data" class="toolbar-data-btn" aria-label="Import data">Import</button>
+          <input type="file" id="import-file" accept=".json" hidden />
+        </div>
         <div class="filters">
           <label class="search-field">
             <span>Search</span>
-            <input type="search" id="filter-search" placeholder="Find events" />
+            <input type="search" id="filter-search" placeholder="Find events\u2026" autocomplete="off" />
           </label>
           <div id="filter-tags" class="filter-tags" aria-label="Filter by tag"></div>
         </div>
@@ -32,27 +43,42 @@
         <form id="agenda-form">
           <label>
             Date
-            <input type="date" id="event-date" required />
+            <input type="date" id="event-date" required autocomplete="off" />
           </label>
           <label>
             Start Time
-            <input type="time" id="event-start" />
+            <input type="time" id="event-start" autocomplete="off" />
           </label>
           <label>
             End Time
-            <input type="time" id="event-end" />
+            <input type="time" id="event-end" autocomplete="off" />
           </label>
           <label>
             Event
-            <input type="text" id="event-title" placeholder="What needs to happen?" required />
+            <input type="text" id="event-title" placeholder="What needs to happen\u2026" required autocomplete="off" />
           </label>
           <label>
             Location
-            <input type="text" id="event-location" placeholder="Where is it?" />
+            <input type="text" id="event-location" placeholder="Where is it\u2026" autocomplete="off" />
           </label>
           <label>
             Notes
-            <textarea id="event-notes" rows="3" placeholder="Add details (optional)"></textarea>
+            <textarea id="event-notes" rows="3" placeholder="Add details (optional)\u2026" autocomplete="off"></textarea>
+          </label>
+          <label>
+            Repeat
+            <select id="event-recurrence">
+              <option value="">Does not repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Every 2 weeks</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+          <label id="recurrence-end-label" hidden>
+            Repeat until
+            <input type="date" id="event-recurrence-end" autocomplete="off" />
           </label>
           <fieldset class="tag-fieldset">
             <legend>Tags</legend>
@@ -68,11 +94,11 @@
 
       <section class="calendar">
         <div class="calendar-header">
-          <button type="button" id="prev-month" aria-label="Previous month">‹</button>
+          <button type="button" id="prev-month" aria-label="Previous month">&#8249;</button>
           <h2 id="calendar-title"></h2>
-          <button type="button" id="next-month" aria-label="Next month">›</button>
+          <button type="button" id="next-month" aria-label="Next month">&#8250;</button>
         </div>
-        <div class="calendar-grid" id="calendar-grid" aria-label="Calendar grid"></div>
+        <div class="calendar-grid" id="calendar-grid" role="grid" aria-label="Calendar grid" aria-readonly="true"></div>
       </section>
 
       <section class="upcoming" aria-live="polite">
@@ -83,12 +109,12 @@
     <aside class="tag-drawer" id="tag-drawer" aria-hidden="true">
       <div class="tag-drawer__header">
         <h2>Tags</h2>
-        <button type="button" id="close-tags" aria-label="Close tag manager">×</button>
+        <button type="button" id="close-tags" aria-label="Close tag manager">&times;</button>
       </div>
       <form id="tag-form" class="tag-form">
         <label>
           New tag name
-          <input type="text" id="tag-name" placeholder="e.g. Work" required />
+          <input type="text" id="tag-name" placeholder="e.g. Work" required autocomplete="off" />
         </label>
         <label>
           Tag color
@@ -105,11 +131,11 @@
     <div class="day-modal" id="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title" hidden>
       <div class="day-modal__header">
         <h3 id="day-modal-title"></h3>
-        <button type="button" id="close-day-modal" aria-label="Close day details">×</button>
+        <button type="button" id="close-day-modal" aria-label="Close day details">&times;</button>
       </div>
       <ul id="day-modal-list" class="day-modal__list" aria-live="polite"></ul>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

@@ -1,3 +1,14 @@
+// ── Constants ───────────────────────────────────────────────────
+const STORAGE_KEY = 'agenda-events';
+const TAG_STORAGE_KEY = 'agenda-tags';
+const FILTER_STORAGE_KEY = 'agenda-filters';
+const SCHEMA_VERSION_KEY = 'agenda-schema-version';
+const SCHEMA_VERSION = 1;
+const DEFAULT_TAG_COLOR = '#6366f1';
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SETTINGS_KEY = 'agenda-settings';
+
+// ── DOM Refs ────────────────────────────────────────────────────
 const form = document.getElementById('agenda-form');
 const eventDate = document.getElementById('event-date');
 const eventTitle = document.getElementById('event-title');
@@ -30,13 +41,14 @@ const dayModal = document.getElementById('day-modal');
 const dayModalTitle = document.getElementById('day-modal-title');
 const dayModalList = document.getElementById('day-modal-list');
 const closeDayModalBtn = document.getElementById('close-day-modal');
+const exportBtn = document.getElementById('export-data');
+const importBtn = document.getElementById('import-data');
+const importFile = document.getElementById('import-file');
+const eventRecurrence = document.getElementById('event-recurrence');
+const eventRecurrenceEnd = document.getElementById('event-recurrence-end');
+const recurrenceEndLabel = document.getElementById('recurrence-end-label');
 
-const STORAGE_KEY = 'agenda-events';
-const TAG_STORAGE_KEY = 'agenda-tags';
-const FILTER_STORAGE_KEY = 'agenda-filters';
-
-const DEFAULT_TAG_COLOR = '#6366f1';
-
+// ── State ───────────────────────────────────────────────────────
 const state = {
   currentMonth: new Date(),
   events: [],
@@ -48,148 +60,187 @@ const state = {
   },
   selectedDay: null,
   lastFocusedDayIso: null,
+  settings: {
+    weekStartsOnMonday: null,
+  },
 };
 
 let toastTimer = null;
+let searchDebounceTimer = null;
+let pendingUndo = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-  setDefaultDate();
-  state.events = loadEvents();
-  state.tags = loadTags();
+// ── Initialization ──────────────────────────────────────────────
+checkSchemaVersion();
+setDefaultDate();
+state.events = loadEvents();
+state.tags = loadTags();
+cleanOrphanTagRefs();
 
-  const savedFilters = loadFilters();
-  if (savedFilters) {
-    state.filters.search = savedFilters.search;
-    const availableTagIds = new Set(state.tags.map((tag) => tag.id));
-    state.filters.tags = savedFilters.tags
-      .filter((id) => availableTagIds.has(id))
-      .filter((id, index, array) => array.indexOf(id) === index);
-  }
+const savedFilters = loadFilters();
+if (savedFilters) {
+  state.filters.search = savedFilters.search;
+  const availableTagIds = new Set(state.tags.map((tag) => tag.id));
+  state.filters.tags = savedFilters.tags
+    .filter((id) => availableTagIds.has(id))
+    .filter((id, index, array) => array.indexOf(id) === index);
+}
 
-  if (filterSearchInput) {
-    filterSearchInput.value = state.filters.search;
-  }
+const savedSettings = loadSettings();
+if (savedSettings) {
+  state.settings.weekStartsOnMonday = savedSettings.weekStartsOnMonday;
+} else {
+  state.settings.weekStartsOnMonday = detectLocaleWeekStart();
+  saveSettings(state.settings);
+}
 
-  renderTagOptions();
-  renderFilterTags();
-  renderTagList();
-  rerenderViews();
-  saveFilters(state.filters);
-  resetTagForm();
+if (filterSearchInput) {
+  filterSearchInput.value = state.filters.search;
+}
 
-  if (cancelEditBtn) {
-    cancelEditBtn.addEventListener('click', () => {
-      const wasEditing = Boolean(state.editingId);
-      clearEditingState();
-      resetFormFields();
-      if (wasEditing) {
-        showToast('Edit cancelled', 'info');
-      }
-    });
-  }
+renderTagOptions();
+renderFilterTags();
+renderTagList();
+rerenderViews();
+saveFilters(state.filters);
+resetTagForm();
 
-  if (openTagsBtn) {
-    openTagsBtn.addEventListener('click', openTagDrawer);
-  }
-  if (closeTagsBtn) {
-    closeTagsBtn.addEventListener('click', closeTagDrawer);
-  }
-  if (tagOverlay) {
-    tagOverlay.addEventListener('click', closeTagDrawer);
-  }
-
-  if (tagForm) {
-    tagForm.addEventListener('submit', handleAddTag);
-  }
-
-  if (closeDayModalBtn) {
-    closeDayModalBtn.addEventListener('click', closeDayModal);
-  }
-  if (dayOverlay) {
-    dayOverlay.addEventListener('click', closeDayModal);
-  }
-
-  if (tagList) {
-    tagList.addEventListener('click', (event) => {
-      if (!(event.target instanceof HTMLElement)) {
-        return;
-      }
-      if (event.target.dataset.action === 'delete-tag') {
-        const { id } = event.target.dataset;
-        if (id) {
-          removeTag(id);
-        }
-      }
-    });
-  }
-
-  if (filterTagsContainer) {
-    filterTagsContainer.addEventListener('change', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-      if (target.dataset.tagId) {
-        toggleFilterTag(target.dataset.tagId, target.checked);
-      }
-    });
-  }
-
-  if (eventTagsContainer) {
-    eventTagsContainer.addEventListener('change', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-      if (target.name === 'event-tags') {
-        // no-op hook to keep future logic consistent
-      }
-    });
-  }
-
-  if (filterSearchInput) {
-    filterSearchInput.addEventListener('input', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-      state.filters.search = target.value;
-      rerenderViews();
-      saveFilters(state.filters);
-    });
-  }
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.selectedDay) {
-      closeDayModal();
+// ── Event Listeners ─────────────────────────────────────────────
+if (cancelEditBtn) {
+  cancelEditBtn.addEventListener('click', () => {
+    const wasEditing = Boolean(state.editingId);
+    clearEditingState();
+    resetFormFields();
+    if (wasEditing) {
+      showToast('Edit cancelled', 'info');
     }
   });
+}
+
+if (openTagsBtn) {
+  openTagsBtn.addEventListener('click', openTagDrawer);
+}
+if (closeTagsBtn) {
+  closeTagsBtn.addEventListener('click', closeTagDrawer);
+}
+if (tagOverlay) {
+  tagOverlay.addEventListener('click', closeTagDrawer);
+}
+
+if (tagForm) {
+  tagForm.addEventListener('submit', handleAddTag);
+}
+
+if (closeDayModalBtn) {
+  closeDayModalBtn.addEventListener('click', closeDayModal);
+}
+if (dayOverlay) {
+  dayOverlay.addEventListener('click', closeDayModal);
+}
+
+if (tagList) {
+  tagList.addEventListener('click', (event) => {
+    if (!(event.target instanceof HTMLElement)) {
+      return;
+    }
+    if (event.target.dataset.action === 'delete-tag') {
+      const { id } = event.target.dataset;
+      if (id) {
+        removeTag(id);
+      }
+    }
+  });
+}
+
+if (filterTagsContainer) {
+  filterTagsContainer.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    if (target.dataset.tagId) {
+      toggleFilterTag(target.dataset.tagId, target.checked);
+    }
+  });
+}
+
+if (filterSearchInput) {
+  filterSearchInput.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    state.filters.search = target.value;
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      rerenderViews();
+      saveFilters(state.filters);
+    }, 250);
+  });
+}
+
+if (eventRecurrence) {
+  eventRecurrence.addEventListener('change', () => {
+    const hasRecurrence = Boolean(eventRecurrence.value);
+    if (recurrenceEndLabel) {
+      recurrenceEndLabel.hidden = !hasRecurrence;
+    }
+    if (eventRecurrenceEnd && !hasRecurrence) {
+      eventRecurrenceEnd.value = '';
+    }
+  });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    if (state.selectedDay) {
+      closeDayModal();
+    } else if (tagDrawer?.classList.contains('open')) {
+      closeTagDrawer();
+    }
+  }
 });
 
-form.addEventListener('submit', (event) => {
-  event.preventDefault();
+if (form) {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
 
-  const dateValue = eventDate.value;
-  const titleValue = eventTitle.value.trim();
-  const startTimeValue = eventStartTime ? eventStartTime.value : '';
-  const endTimeValue = eventEndTime ? eventEndTime.value : '';
-  const selectedTags = getSelectedEventTagIds();
-  if (!dateValue || !titleValue) {
-    return;
-  }
+    const dateValue = eventDate.value;
+    const titleValue = eventTitle.value.trim();
+    const startTimeValue = eventStartTime ? eventStartTime.value : '';
+    const endTimeValue = eventEndTime ? eventEndTime.value : '';
+    const selectedTags = getSelectedEventTagIds();
+    const recurrenceValue = eventRecurrence ? eventRecurrence.value : '';
+    const recurrenceEndValue = eventRecurrenceEnd ? eventRecurrenceEnd.value : '';
+    if (!dateValue || !titleValue) {
+      return;
+    }
 
-  if (startTimeValue && endTimeValue && endTimeValue < startTimeValue) {
-    showToast('End time must be after start time', 'error');
-    return;
-  }
+    if (startTimeValue && endTimeValue && endTimeValue < startTimeValue) {
+      showToast('End time must be after start time', 'error');
+      return;
+    }
 
-  const isEditing = Boolean(state.editingId);
+    const isEditing = Boolean(state.editingId);
 
-  if (state.editingId) {
-    const index = state.events.findIndex((item) => item.id === state.editingId);
-    if (index !== -1) {
-      state.events[index] = {
-        ...state.events[index],
+    if (state.editingId) {
+      const index = state.events.findIndex((item) => item.id === state.editingId);
+      if (index !== -1) {
+        state.events[index] = {
+          ...state.events[index],
+          date: dateValue,
+          title: titleValue,
+          startTime: startTimeValue,
+          endTime: endTimeValue,
+          location: eventLocation.value.trim(),
+          notes: eventNotes.value.trim(),
+          tags: selectedTags,
+          recurrence: recurrenceValue || null,
+          recurrenceEnd: recurrenceEndValue || null,
+        };
+      }
+    } else {
+      state.events.push({
+        id: createId(),
         date: dateValue,
         title: titleValue,
         startTime: startTimeValue,
@@ -197,45 +248,140 @@ form.addEventListener('submit', (event) => {
         location: eventLocation.value.trim(),
         notes: eventNotes.value.trim(),
         tags: selectedTags,
-      };
+        recurrence: recurrenceValue || null,
+        recurrenceEnd: recurrenceEndValue || null,
+      });
     }
-  } else {
-    state.events.push({
-      id: createId(),
-      date: dateValue,
-      title: titleValue,
-      startTime: startTimeValue,
-      endTime: endTimeValue,
-      location: eventLocation.value.trim(),
-      notes: eventNotes.value.trim(),
-      tags: selectedTags,
-    });
+
+    const saved = saveEvents(state.events);
+    clearEditingState();
+    resetFormFields({ keepDate: true });
+    rerenderViews();
+    if (saved) {
+      showToast(isEditing ? 'Event updated' : 'Event added', 'success');
+    }
+  });
+}
+
+if (prevMonthBtn) {
+  prevMonthBtn.addEventListener('click', () => {
+    const current = state.currentMonth;
+    state.currentMonth = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+    renderCalendar();
+  });
+}
+
+if (nextMonthBtn) {
+  nextMonthBtn.addEventListener('click', () => {
+    const current = state.currentMonth;
+    state.currentMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+    renderCalendar();
+  });
+}
+
+// Calendar grid delegation (F2 fix — single handler instead of per-cell listeners)
+if (calendarGrid) {
+  calendarGrid.addEventListener('click', handleCalendarClick);
+  calendarGrid.addEventListener('keydown', handleCalendarKeydown);
+}
+
+// Export / Import (D1/B1 fix)
+if (exportBtn) {
+  exportBtn.addEventListener('click', exportData);
+}
+if (importBtn && importFile) {
+  importBtn.addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', handleImportData);
+}
+
+// ── Calendar Delegation Handlers ────────────────────────────────
+function handleCalendarClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
   }
 
-  const saved = saveEvents(state.events);
-  clearEditingState();
-  resetFormFields({ keepDate: true });
-  rerenderViews();
-  if (saved) {
-    showToast(isEditing ? 'Event updated' : 'Event added', 'success');
+  const badge = target.closest('.event-number');
+  if (badge instanceof HTMLElement) {
+    event.stopPropagation();
+    const cell = badge.closest('.calendar-cell');
+    const isoDate = cell?.dataset?.date;
+    if (isoDate) {
+      state.lastFocusedDayIso = isoDate;
+      const eventsForDay = getFilteredEvents(state.events)
+        .filter((item) => item.date === isoDate)
+        .sort(compareEvents);
+      openDayModal(isoDate, eventsForDay);
+    }
+    return;
   }
-});
 
-prevMonthBtn.addEventListener('click', () => {
-  const current = state.currentMonth;
-  state.currentMonth = new Date(current.getFullYear(), current.getMonth() - 1, 1);
-  renderCalendar();
-});
+  const cell = target.closest('.calendar-cell:not(.empty)');
+  if (cell instanceof HTMLElement && cell.dataset.date) {
+    selectCalendarDay(cell.dataset.date);
+  }
+}
 
-nextMonthBtn.addEventListener('click', () => {
-  const current = state.currentMonth;
-  state.currentMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-  renderCalendar();
-});
+function handleCalendarKeydown(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
 
+  if (event.key === 'Enter' || event.key === ' ') {
+    const badge = target.closest('.event-number');
+    if (badge instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopPropagation();
+      const cell = badge.closest('.calendar-cell');
+      const isoDate = cell?.dataset?.date;
+      if (isoDate) {
+        state.lastFocusedDayIso = isoDate;
+        const eventsForDay = getFilteredEvents(state.events)
+          .filter((item) => item.date === isoDate)
+          .sort(compareEvents);
+        openDayModal(isoDate, eventsForDay);
+      }
+      return;
+    }
+
+    const cell = target.closest('.calendar-cell:not(.empty)');
+    if (cell instanceof HTMLElement && cell.dataset.date) {
+      event.preventDefault();
+      selectCalendarDay(cell.dataset.date);
+    }
+    return;
+  }
+
+  // Arrow-key grid navigation (U5 fix)
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+    const cell = target.closest('.calendar-cell:not(.empty)');
+    if (!cell) {
+      return;
+    }
+    event.preventDefault();
+    const cells = Array.from(calendarGrid.querySelectorAll('.calendar-cell:not(.empty)'));
+    const idx = cells.indexOf(cell);
+    if (idx === -1) {
+      return;
+    }
+
+    let next = idx;
+    if (event.key === 'ArrowLeft') next = idx - 1;
+    else if (event.key === 'ArrowRight') next = idx + 1;
+    else if (event.key === 'ArrowUp') next = idx - 7;
+    else if (event.key === 'ArrowDown') next = idx + 7;
+
+    if (next >= 0 && next < cells.length) {
+      cells[next].focus();
+    }
+  }
+}
+
+// ── Render Functions ────────────────────────────────────────────
 function renderAgenda() {
-  const sorted = getFilteredEvents([...state.events]).sort(compareEvents);
-  agendaList.innerHTML = '';
+  const sorted = getFilteredEvents(state.events).sort(compareEvents);
+  agendaList.replaceChildren();
 
   const filtersActive = Boolean(state.filters.search) || state.filters.tags.length > 0;
 
@@ -267,27 +413,33 @@ function renderUpcomingWeek() {
     return;
   }
 
-  upcomingList.innerHTML = '';
+  upcomingList.replaceChildren();
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const weekStartsOnMonday = state.settings.weekStartsOnMonday;
+  const currentDay = today.getDay();
+  let daysUntilEnd;
+  if (weekStartsOnMonday) {
+    daysUntilEnd = currentDay === 0 ? 0 : 7 - currentDay;
+  } else {
+    daysUntilEnd = 6 - currentDay;
+  }
+
   const endOfWeek = new Date(today);
-  endOfWeek.setDate(today.getDate() + (6 - today.getDay()));
+  endOfWeek.setDate(today.getDate() + daysUntilEnd);
   endOfWeek.setHours(23, 59, 59, 999);
 
-  const upcoming = getFilteredEvents([...state.events])
-    .map((item) => ({
-      ...item,
-      dateObj: new Date(item.date),
-    }))
+  const upcoming = getFilteredEvents(state.events)
     .filter((item) => {
-      const eventDate = item.dateObj;
-      if (Number.isNaN(eventDate.getTime())) {
+      const d = new Date(item.date + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) {
         return false;
       }
-      eventDate.setHours(0, 0, 0, 0);
-      return eventDate >= today && eventDate <= endOfWeek;
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      return dayStart >= today && dayStart <= endOfWeek;
     })
     .sort(compareEvents);
 
@@ -324,95 +476,112 @@ function renderCalendar() {
 
   const monthName = current.toLocaleString('default', { month: 'long', year: 'numeric' });
   calendarTitle.textContent = monthName;
+  calendarTitle.id = 'calendar-title-id';
 
-  calendarGrid.innerHTML = '';
-  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  calendarGrid.replaceChildren();
+  calendarGrid.setAttribute('aria-labelledby', 'calendar-title-id');
 
-  const filteredEvents = getFilteredEvents([...state.events]);
+  const weekStartsOnMonday = state.settings.weekStartsOnMonday;
+  const dayLabels = weekStartsOnMonday
+    ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  for (const label of dayLabels) {
+  const filteredEvents = getFilteredEvents(state.events);
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'calendar-row calendar-header-row';
+  headerRow.setAttribute('role', 'row');
+  headerRow.setAttribute('aria-hidden', 'true');
+
+  for (let i = 0; i < dayLabels.length; i += 1) {
     const cell = document.createElement('div');
     cell.className = 'calendar-label';
-    cell.textContent = label;
-    calendarGrid.appendChild(cell);
+    cell.setAttribute('role', 'columnheader');
+    cell.setAttribute('aria-colindex', String(i + 1));
+    cell.textContent = dayLabels[i];
+    headerRow.appendChild(cell);
   }
+  calendarGrid.appendChild(headerRow);
 
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDateOfMonth = new Date(year, month + 1, 0).getDate();
-  const startOffset = firstDayOfMonth.getDay();
-
-  for (let i = 0; i < startOffset; i += 1) {
-    const filler = document.createElement('div');
-    filler.className = 'calendar-cell empty';
-    calendarGrid.appendChild(filler);
+  let startOffset = firstDayOfMonth.getDay();
+  if (weekStartsOnMonday) {
+    startOffset = startOffset === 0 ? 6 : startOffset - 1;
   }
 
-  for (let day = 1; day <= lastDateOfMonth; day += 1) {
-    const cell = document.createElement('div');
-    cell.className = 'calendar-cell';
+  const totalCells = startOffset + lastDateOfMonth;
+  const numWeeks = Math.ceil(totalCells / 7);
 
-    const date = new Date(year, month, day);
-    const isoDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  for (let week = 0; week < numWeeks; week += 1) {
+    const row = document.createElement('div');
+    row.className = 'calendar-row';
+    row.setAttribute('role', 'row');
 
-    const number = document.createElement('span');
-    number.className = 'date-number';
-    number.textContent = day;
-    cell.appendChild(number);
+    for (let col = 0; col < 7; col += 1) {
+      const cellIndex = week * 7 + col;
+      const day = cellIndex - startOffset + 1;
 
-    cell.dataset.date = isoDate;
-    cell.addEventListener('click', () => selectCalendarDay(isoDate));
+      if (cellIndex < startOffset || day > lastDateOfMonth) {
+        const filler = document.createElement('div');
+        filler.className = 'calendar-cell empty';
+        filler.setAttribute('role', 'gridcell');
+        filler.setAttribute('aria-hidden', 'true');
+        filler.setAttribute('aria-colindex', String(col + 1));
+        row.appendChild(filler);
+      } else {
+        const cell = document.createElement('div');
+        cell.className = 'calendar-cell';
+        cell.tabIndex = 0;
+        cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-colindex', String(col + 1));
 
-    const eventsForDay = filteredEvents
-      .filter((item) => item.date === isoDate)
-      .sort(compareEvents);
+        const date = new Date(year, month, day);
+        const isoDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-    if (eventsForDay.length) {
-      const badge = document.createElement('button');
-      badge.type = 'button';
-      badge.className = 'event-number';
-      badge.textContent = `${eventsForDay.length}`;
-      badge.setAttribute(
-        'aria-label',
-        `${eventsForDay.length} event${eventsForDay.length > 1 ? 's' : ''} on ${formatDate(isoDate)}`,
-      );
-      badge.addEventListener('click', (event) => {
-        event.stopPropagation();
-        state.lastFocusedDayIso = isoDate;
-        openDayModal(isoDate, eventsForDay);
-      });
-      badge.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          state.lastFocusedDayIso = isoDate;
-          openDayModal(isoDate, eventsForDay);
+        const number = document.createElement('span');
+        number.className = 'date-number';
+        number.textContent = day;
+        number.setAttribute('aria-hidden', 'true');
+        cell.appendChild(number);
+
+        cell.dataset.date = isoDate;
+        cell.setAttribute('aria-label', formatDate(isoDate));
+
+        const eventsForDay = filteredEvents
+          .filter((item) => item.date === isoDate)
+          .sort(compareEvents);
+
+        if (eventsForDay.length) {
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = 'event-number';
+          badge.textContent = `${eventsForDay.length}`;
+          badge.setAttribute(
+            'aria-label',
+            `${eventsForDay.length} event${eventsForDay.length > 1 ? 's' : ''} on ${formatDate(isoDate)}`,
+          );
+          cell.appendChild(badge);
+          cell.classList.add('has-events');
+          cell.setAttribute('aria-describedby', `events-${isoDate}`);
         }
-      });
-      cell.appendChild(badge);
-      cell.classList.add('has-events');
-      cell.style.cursor = 'pointer';
-    } else {
-      cell.classList.remove('has-events');
-      cell.style.cursor = 'default';
-      if (state.lastFocusedDayIso === isoDate) {
-        state.lastFocusedDayIso = null;
-      }
-      const existingBadge = cell.querySelector('.event-number');
-      if (existingBadge) {
-        existingBadge.remove();
+
+        if (isToday(date)) {
+          cell.classList.add('today');
+          cell.setAttribute('aria-current', 'date');
+        }
+
+        row.appendChild(cell);
       }
     }
 
-    if (isToday(date)) {
-      cell.classList.add('today');
-    }
-
-    calendarGrid.appendChild(cell);
+    calendarGrid.appendChild(row);
   }
 }
 
+// F1 fix — parse ISO dates as local, not UTC
 function formatDate(isoDate) {
-  const date = new Date(isoDate);
+  const date = new Date(isoDate + 'T00:00:00');
   return date.toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'short',
@@ -432,6 +601,7 @@ function buildEventContent(item, className = 'agenda-content') {
   container.appendChild(timeElement);
 
   const title = document.createElement('span');
+  title.className = 'event-title';
   title.textContent = item.title;
   container.appendChild(title);
 
@@ -441,21 +611,30 @@ function buildEventContent(item, className = 'agenda-content') {
 
     let label = '';
     if (item.startTime && item.endTime) {
-      label = `${formatTime(item.startTime)} – ${formatTime(item.endTime)}`;
+      label = `${formatTime(item.startTime)} \u2013 ${formatTime(item.endTime)}`;
     } else if (item.startTime) {
       label = formatTime(item.startTime);
     } else if (item.endTime) {
       label = `Until ${formatTime(item.endTime)}`;
     }
 
-    timeMeta.textContent = label ? `⏰ ${label}` : '⏰ All day';
+    // Accessibility: wrap emoji in aria-hidden span
+    const icon = document.createElement('span');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '\u23F0 ';
+    timeMeta.appendChild(icon);
+    timeMeta.appendChild(document.createTextNode(label || 'All day'));
     container.appendChild(timeMeta);
   }
 
   if (item.location) {
     const meta = document.createElement('span');
     meta.className = 'event-meta';
-    meta.textContent = `📍 ${item.location}`;
+    const icon = document.createElement('span');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '\uD83D\uDCCD ';
+    meta.appendChild(icon);
+    meta.appendChild(document.createTextNode(item.location));
     container.appendChild(meta);
   }
 
@@ -464,6 +643,24 @@ function buildEventContent(item, className = 'agenda-content') {
     notes.className = 'event-notes';
     notes.textContent = item.notes;
     container.appendChild(notes);
+  }
+
+  if (item.recurrence) {
+    const recurrenceMeta = document.createElement('span');
+    recurrenceMeta.className = 'event-meta recurrence-indicator';
+    const icon = document.createElement('span');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '\u{1F501} ';
+    recurrenceMeta.appendChild(icon);
+    const recurrenceLabels = {
+      daily: 'Repeats daily',
+      weekly: 'Repeats weekly',
+      biweekly: 'Repeats every 2 weeks',
+      monthly: 'Repeats monthly',
+      yearly: 'Repeats yearly',
+    };
+    recurrenceMeta.appendChild(document.createTextNode(recurrenceLabels[item.recurrence] || 'Recurring'));
+    container.appendChild(recurrenceMeta);
   }
 
   if (Array.isArray(item.tags) && item.tags.length) {
@@ -533,7 +730,9 @@ function getFilteredEvents(events) {
   const search = state.filters.search.trim().toLowerCase();
   const tagFilters = state.filters.tags;
 
-  return events.filter((event) => {
+  const expanded = expandRecurringEvents(events);
+
+  return expanded.filter((event) => {
     if (search) {
       const haystack = [event.title, event.location, event.notes]
         .filter(Boolean)
@@ -552,6 +751,103 @@ function getFilteredEvents(events) {
 
     return true;
   });
+}
+
+function expandRecurringEvents(events) {
+  const expanded = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const maxFutureDate = new Date(today);
+  maxFutureDate.setFullYear(today.getFullYear() + 2);
+
+  for (const event of events) {
+    if (!event.recurrence) {
+      expanded.push(event);
+      continue;
+    }
+
+    const baseDate = new Date(event.date + 'T00:00:00');
+    const endDate = event.recurrenceEnd
+      ? new Date(event.recurrenceEnd + 'T23:59:59')
+      : new Date(maxFutureDate);
+
+    const instances = generateRecurrenceInstances(event, baseDate, endDate);
+    expanded.push(...instances);
+  }
+
+  return expanded;
+}
+
+function generateRecurrenceInstances(event, startDate, endDate) {
+  const instances = [];
+  const interval = getRecurrenceInterval(event.recurrence);
+  if (!interval) {
+    instances.push(event);
+    return instances;
+  }
+
+  const exclusions = new Set(event.recurrenceExclusions || []);
+  const eventDate = new Date(startDate);
+  let instanceCount = 0;
+  const maxInstances = 500;
+
+  while (eventDate <= endDate && instanceCount < maxInstances) {
+    const isoDate = formatDateISO(eventDate);
+    if (!exclusions.has(isoDate)) {
+      instances.push({
+        ...event,
+        id: `${event.id}--${isoDate}`,
+        date: isoDate,
+        isRecurrenceInstance: true,
+        originalEventId: event.id,
+        originalDate: event.date,
+      });
+    }
+    instanceCount++;
+
+    advanceDate(eventDate, event.recurrence);
+  }
+
+  return instances;
+}
+
+function getRecurrenceInterval(recurrence) {
+  const intervals = {
+    daily: 1,
+    weekly: 7,
+    biweekly: 14,
+    monthly: 'monthly',
+    yearly: 'yearly',
+  };
+  return intervals[recurrence] || null;
+}
+
+function advanceDate(date, recurrence) {
+  switch (recurrence) {
+    case 'daily':
+      date.setDate(date.getDate() + 1);
+      break;
+    case 'weekly':
+      date.setDate(date.getDate() + 7);
+      break;
+    case 'biweekly':
+      date.setDate(date.getDate() + 14);
+      break;
+    case 'monthly':
+      date.setMonth(date.getMonth() + 1);
+      break;
+    case 'yearly':
+      date.setFullYear(date.getFullYear() + 1);
+      break;
+  }
+}
+
+function formatDateISO(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function getSelectedEventTagIds() {
@@ -580,7 +876,7 @@ function renderTagOptions(preselected) {
     selectedIds = getSelectedEventTagIds();
   }
 
-  eventTagsContainer.innerHTML = '';
+  eventTagsContainer.replaceChildren();
 
   if (!state.tags.length) {
     const empty = document.createElement('p');
@@ -626,7 +922,7 @@ function renderFilterTags() {
     return;
   }
 
-  filterTagsContainer.innerHTML = '';
+  filterTagsContainer.replaceChildren();
 
   if (!state.tags.length) {
     const empty = document.createElement('span');
@@ -671,7 +967,7 @@ function renderTagList() {
     return;
   }
 
-  tagList.innerHTML = '';
+  tagList.replaceChildren();
 
   if (!state.tags.length) {
     const empty = document.createElement('li');
@@ -768,11 +1064,18 @@ function handleAddTag(event) {
   }
 }
 
+// U3 fix — undo toast pattern instead of confirm()
 function removeTag(tagId) {
-  state.tags = state.tags.filter((tag) => tag.id !== tagId);
+  const tag = state.tags.find((t) => t.id === tagId);
+  const tagName = tag?.name || 'tag';
+
+  const previousTags = [...state.tags];
+  const previousEvents = [...state.events];
+  const previousFilterTags = [...state.filters.tags];
+
+  state.tags = state.tags.filter((t) => t.id !== tagId);
   state.filters.tags = state.filters.tags.filter((id) => id !== tagId);
 
-  let eventsUpdated = false;
   state.events = state.events.map((event) => {
     if (!Array.isArray(event.tags)) {
       return event;
@@ -780,24 +1083,33 @@ function removeTag(tagId) {
     if (!event.tags.includes(tagId)) {
       return event;
     }
-    eventsUpdated = true;
     return {
       ...event,
       tags: event.tags.filter((id) => id !== tagId),
     };
   });
 
-  const tagsSaved = saveTags(state.tags);
-  const eventsSaved = eventsUpdated ? saveEvents(state.events) : true;
+  saveTags(state.tags);
+  saveEvents(state.events);
   saveFilters(state.filters);
   renderTagOptions();
   renderFilterTags();
   renderTagList();
   rerenderViews();
 
-  if (tagsSaved && eventsSaved) {
-    showToast('Tag removed', 'info');
-  }
+  showToast(`"${tagName}" removed`, 'info', () => {
+    state.tags = previousTags;
+    state.filters.tags = previousFilterTags;
+    state.events = previousEvents;
+    saveTags(state.tags);
+    saveEvents(state.events);
+    saveFilters(state.filters);
+    renderTagOptions();
+    renderFilterTags();
+    renderTagList();
+    rerenderViews();
+    showToast('Tag restored', 'success');
+  });
 }
 
 function openTagDrawer() {
@@ -838,7 +1150,7 @@ function rerenderViews() {
   renderCalendar();
   renderUpcomingWeek();
   if (state.selectedDay) {
-    const currentEvents = getFilteredEvents([...state.events])
+    const currentEvents = getFilteredEvents(state.events)
       .filter((event) => event.date === state.selectedDay)
       .sort(compareEvents);
     if (currentEvents.length) {
@@ -895,7 +1207,7 @@ function renderDayModalContent(isoDate, events) {
   state.selectedDay = isoDate;
 
   const sortedEvents = events.slice().sort(compareEvents);
-  const titleDate = new Date(isoDate);
+  const titleDate = new Date(isoDate + 'T00:00:00');
   dayModalTitle.textContent = titleDate.toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -903,7 +1215,7 @@ function renderDayModalContent(isoDate, events) {
     year: 'numeric',
   });
 
-  dayModalList.innerHTML = '';
+  dayModalList.replaceChildren();
 
   if (!sortedEvents.length) {
     const empty = document.createElement('li');
@@ -927,6 +1239,7 @@ function renderDayModalContent(isoDate, events) {
   }
 }
 
+// S2 fix — validate lastFocusedDayIso before using in querySelector
 function closeDayModal() {
   state.selectedDay = null;
   if (dayOverlay) {
@@ -937,9 +1250,9 @@ function closeDayModal() {
     dayModal.setAttribute('aria-hidden', 'true');
   }
   if (dayModalList) {
-    dayModalList.innerHTML = '';
+    dayModalList.replaceChildren();
   }
-  if (state.lastFocusedDayIso) {
+  if (state.lastFocusedDayIso && ISO_DATE_RE.test(state.lastFocusedDayIso)) {
     const focusTarget = calendarGrid?.querySelector(
       `.calendar-cell[data-date="${state.lastFocusedDayIso}"]`,
     );
@@ -959,10 +1272,15 @@ function isToday(date) {
   );
 }
 
+// S3 fix — use crypto.randomUUID when available
 function createId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
   return `event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// ── Storage Functions ───────────────────────────────────────────
 function loadEvents() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -985,6 +1303,11 @@ function loadEvents() {
         notes: typeof item.notes === 'string' ? item.notes : '',
         tags: Array.isArray(item.tags)
           ? item.tags.filter((tagId) => typeof tagId === 'string')
+          : [],
+        recurrence: typeof item.recurrence === 'string' ? item.recurrence : null,
+        recurrenceEnd: typeof item.recurrenceEnd === 'string' ? item.recurrenceEnd : null,
+        recurrenceExclusions: Array.isArray(item.recurrenceExclusions)
+          ? item.recurrenceExclusions.filter((d) => typeof d === 'string')
           : [],
       }));
   } catch (error) {
@@ -1042,6 +1365,7 @@ function saveTags(tags) {
   }
 }
 
+// D6 fix — clear corrupted filter entry from localStorage on parse error
 function loadFilters() {
   try {
     const raw = localStorage.getItem(FILTER_STORAGE_KEY);
@@ -1062,6 +1386,7 @@ function loadFilters() {
     return { search, tags };
   } catch (error) {
     console.error('Failed to load filters from storage', error);
+    localStorage.removeItem(FILTER_STORAGE_KEY);
     return null;
   }
 }
@@ -1082,41 +1407,176 @@ function saveFilters(filters) {
   }
 }
 
-function createDeleteButton(id) {
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    return {
+      weekStartsOnMonday:
+        typeof parsed.weekStartsOnMonday === 'boolean' ? parsed.weekStartsOnMonday : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSettings(settings) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function detectLocaleWeekStart() {
+  try {
+    const locale = navigator.language || 'en-US';
+    const parts = new Intl.Locale(locale);
+    const region = parts.region || 'US';
+    const weekInfo = new Intl.Locale(locale, { calendar: 'gregory' }).getWeekInfo?.();
+    if (weekInfo && typeof weekInfo.firstDay === 'number') {
+      return weekInfo.firstDay === 1;
+    }
+    const mondayStartRegions = new Set([
+      'AT', 'BE', 'BG', 'CH', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GB', 'GR',
+      'HR', 'HU', 'IE', 'IS', 'IT', 'LI', 'LT', 'LU', 'LV', 'MC', 'MT', 'NL', 'NO', 'PL',
+      'PT', 'RO', 'SE', 'SI', 'SK', 'SM', 'VA', 'AD', 'AX', 'BL', 'FO', 'GF', 'GP', 'MF',
+      'MQ', 'NC', 'PF', 'PM', 'RE', 'WF', 'YT',
+    ]);
+    return mondayStartRegions.has(region);
+  } catch {
+    return false;
+  }
+}
+
+// D5/B5 fix — schema version tracking for future migrations
+function checkSchemaVersion() {
+  const stored = localStorage.getItem(SCHEMA_VERSION_KEY);
+  const version = stored ? parseInt(stored, 10) : 0;
+
+  if (version < SCHEMA_VERSION) {
+    // Future migrations would be handled here based on version number.
+    localStorage.setItem(SCHEMA_VERSION_KEY, String(SCHEMA_VERSION));
+  }
+}
+
+// D3 fix — remove orphan tag references from events
+function cleanOrphanTagRefs() {
+  const validTagIds = new Set(state.tags.map((t) => t.id));
+  let changed = false;
+
+  state.events = state.events.map((event) => {
+    if (!Array.isArray(event.tags)) {
+      return event;
+    }
+    const cleaned = event.tags.filter((id) => validTagIds.has(id));
+    if (cleaned.length !== event.tags.length) {
+      changed = true;
+      return { ...event, tags: cleaned };
+    }
+    return event;
+  });
+
+  if (changed) {
+    saveEvents(state.events);
+  }
+}
+
+// ── UI Helpers ──────────────────────────────────────────────────
+function createDeleteButton(event) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'item-remove';
   button.textContent = 'Delete';
-  button.addEventListener('click', () => handleDeleteEvent(id));
+  button.addEventListener('click', () => {
+    if (event.isRecurrenceInstance) {
+      handleDeleteRecurrenceInstance(event);
+    } else {
+      handleDeleteEvent(event.id);
+    }
+  });
   button.setAttribute('aria-label', 'Delete event');
   return button;
 }
 
-function createEditButton(id) {
+function createEditButton(event) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'item-edit';
   button.textContent = 'Edit';
-  button.addEventListener('click', () => startEditingEvent(id));
+  button.addEventListener('click', () => {
+    if (event.isRecurrenceInstance) {
+      startEditingEvent(event.originalEventId);
+    } else {
+      startEditingEvent(event.id);
+    }
+  });
   button.setAttribute('aria-label', 'Edit event');
   return button;
 }
 
-function handleDeleteEvent(id) {
-  const nextEvents = state.events.filter((item) => item.id !== id);
-  if (nextEvents.length === state.events.length) {
+function handleDeleteRecurrenceInstance(instance) {
+  const originalEvent = state.events.find((e) => e.id === instance.originalEventId);
+  if (!originalEvent) {
+    handleDeleteEvent(instance.id);
     return;
   }
 
-  state.events = nextEvents;
+  const previousEvents = [...state.events];
+  const exclusionDate = instance.date;
+
+  const exclusions = originalEvent.recurrenceExclusions || [];
+  if (!exclusions.includes(exclusionDate)) {
+    exclusions.push(exclusionDate);
+  }
+
+  const index = state.events.findIndex((e) => e.id === instance.originalEventId);
+  if (index !== -1) {
+    state.events[index] = {
+      ...state.events[index],
+      recurrenceExclusions: exclusions,
+    };
+  }
+
+  saveEvents(state.events);
+  rerenderViews();
+
+  showToast('Instance deleted', 'info', () => {
+    state.events = previousEvents;
+    saveEvents(state.events);
+    rerenderViews();
+    showToast('Instance restored', 'success');
+  });
+}
+
+// U3 fix — undo toast pattern instead of confirm()
+function handleDeleteEvent(id) {
+  const eventToDelete = state.events.find((item) => item.id === id);
+  if (!eventToDelete) {
+    return;
+  }
+
+  const previousEvents = [...state.events];
+  state.events = state.events.filter((item) => item.id !== id);
+
   if (state.editingId === id) {
     clearEditingState();
     resetFormFields();
   }
+
   const saved = saveEvents(state.events);
   rerenderViews();
+
   if (saved) {
-    showToast('Event deleted', 'error');
+    showToast('Event deleted', 'info', () => {
+      state.events = previousEvents;
+      saveEvents(state.events);
+      rerenderViews();
+      showToast('Event restored', 'success');
+    });
   }
 }
 
@@ -1142,6 +1602,16 @@ function startEditingEvent(id) {
   }
   if (eventEndTime) {
     eventEndTime.value = target.endTime || '';
+  }
+  if (eventRecurrence) {
+    eventRecurrence.value = target.recurrence || '';
+    const hasRecurrence = Boolean(target.recurrence);
+    if (recurrenceEndLabel) {
+      recurrenceEndLabel.hidden = !hasRecurrence;
+    }
+  }
+  if (eventRecurrenceEnd) {
+    eventRecurrenceEnd.value = target.recurrenceEnd || '';
   }
   renderTagOptions(target.tags || []);
   if (submitButton) {
@@ -1178,6 +1648,15 @@ function resetFormFields(options = {}) {
   if (eventNotes) {
     eventNotes.value = '';
   }
+  if (eventRecurrence) {
+    eventRecurrence.value = '';
+  }
+  if (eventRecurrenceEnd) {
+    eventRecurrenceEnd.value = '';
+  }
+  if (recurrenceEndLabel) {
+    recurrenceEndLabel.hidden = true;
+  }
   renderTagOptions([]);
   if (!keepDate) {
     setDefaultDate();
@@ -1185,12 +1664,20 @@ function resetFormFields(options = {}) {
   eventTitle.focus();
 }
 
-function setDefaultDate() {
-  const today = new Date().toISOString().split('T')[0];
-  eventDate.value = today;
+// F1 fix — use local date components instead of toISOString (which is UTC)
+function getLocalISODate(date) {
+  const d = date || new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-function showToast(message, variant = 'info') {
+function setDefaultDate() {
+  eventDate.value = getLocalISODate();
+}
+
+function showToast(message, variant = 'info', onUndo = null) {
   if (!toast || !message) {
     return;
   }
@@ -1199,16 +1686,115 @@ function showToast(message, variant = 'info') {
   toast.textContent = message;
   toast.className = `toast toast--${safeVariant}`;
 
-  // Trigger a reflow so repeated toasts animate correctly.
+  toast.replaceChildren();
+  const textSpan = document.createElement('span');
+  textSpan.textContent = message;
+  toast.appendChild(textSpan);
+
+  if (onUndo && typeof onUndo === 'function') {
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'toast-undo';
+    undoBtn.textContent = 'Undo';
+    undoBtn.addEventListener('click', () => {
+      onUndo();
+      toast.classList.remove('show');
+      clearTimeout(toastTimer);
+    });
+    toast.appendChild(undoBtn);
+  }
+
   void toast.offsetWidth;
 
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toast.classList.remove('show');
-  }, 2500);
+  }, 4000);
 }
 
+// ── Export / Import (D1/B1 fix) ─────────────────────────────────
+function exportData() {
+  const data = {
+    version: SCHEMA_VERSION,
+    events: state.events,
+    tags: state.tags,
+    exportedAt: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `agenda-backup-${getLocalISODate()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Data exported', 'success');
+}
+
+function handleImportData(event) {
+  const file = event.target?.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid format');
+      }
+
+      const events = Array.isArray(data.events) ? data.events : [];
+      const tags = Array.isArray(data.tags) ? data.tags : [];
+
+      state.events = events
+        .filter((item) => typeof item?.date === 'string' && typeof item?.title === 'string')
+        .map((item) => ({
+          ...item,
+          startTime: typeof item.startTime === 'string' ? item.startTime : '',
+          endTime: typeof item.endTime === 'string' ? item.endTime : '',
+          location: typeof item.location === 'string' ? item.location : '',
+          notes: typeof item.notes === 'string' ? item.notes : '',
+          tags: Array.isArray(item.tags)
+            ? item.tags.filter((id) => typeof id === 'string')
+            : [],
+        }));
+
+      state.tags = tags
+        .filter((item) => typeof item?.id === 'string' && typeof item?.name === 'string')
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          color: typeof item.color === 'string' ? item.color : DEFAULT_TAG_COLOR,
+        }));
+
+      saveEvents(state.events);
+      saveTags(state.tags);
+
+      state.filters = { search: '', tags: [] };
+      if (filterSearchInput) {
+        filterSearchInput.value = '';
+      }
+      saveFilters(state.filters);
+
+      renderTagOptions();
+      renderFilterTags();
+      renderTagList();
+      rerenderViews();
+
+      showToast(`Imported ${state.events.length} events and ${state.tags.length} tags`, 'success');
+    } catch (err) {
+      console.error('Import failed', err);
+      showToast('Invalid backup file', 'error');
+    }
+    // Reset file input so the same file can be re-imported
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+// ── Color Utilities ─────────────────────────────────────────────
 function normalizeHexColor(value) {
   if (typeof value !== 'string') {
     return DEFAULT_TAG_COLOR;
@@ -1263,4 +1849,13 @@ function getReadableTextColor(hex) {
 
   const luminance = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
   return luminance > 0.55 ? '#1f2937' : '#f8fafc';
+}
+
+// ── Service Worker Registration (PWA) ───────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
 }

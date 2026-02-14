@@ -8,12 +8,17 @@ Applicazione web single-page per pianificare eventi quotidiani, visualizzarli in
 
 ## Funzionalità principali
 - Creazione e modifica di eventi con data, fascia oraria, luogo, note e tag colorati
+- **Eventi ricorrenti**: supporto per ripetizioni giornaliere, settimanali, bisettimanali, mensili e annuali
 - Vista agenda ordinata e filtro testuale per trovare rapidamente un'attività
 - Widget "This Week" per avere sempre sotto controllo gli impegni a breve termine
 - Calendario mensile interattivo con badge numerici e modale di dettaglio per ciascun giorno
 - Gestione avanzata dei tag (creazione, assegnazione, cancellazione) con colori personalizzati
 - Persistenza automatica su `localStorage` per eventi, filtri e tag
-- Notifiche toast contestuali e supporto da tastiera (ESC per chiudere modali, navigazione sui badge)
+- Notifiche toast contestuali con supporto **Undo** per azioni distruttive
+- Supporto da tastiera (ESC per chiudere modali, navigazione a griglia con frecce)
+- **PWA**: installabile come app standalone, funziona offline
+- **Internazionalizzazione**: inizio settimana automatico in base alla locale (Lunedì/Domenica)
+- **Accessibilità**: ARIA grid pattern completo per il calendario
 
 ## Stack e dipendenze
 - HTML5 semantico per struttura e accessibilità
@@ -31,17 +36,30 @@ Applicazione web single-page per pianificare eventi quotidiani, visualizzarli in
 - `index.html` – layout principale con form agenda, calendario, drawer tag e modale giornaliera
 - `styles.css` – stile responsive con grid layout, badge, toast e drawer animato
 - `app.js` – state management, rendering dinamico, filtri, gestione tag, salvataggio dati
+- `manifest.json` – PWA manifest per installazione
+- `sw.js` – service worker per funzionalità offline
+- `package.json` – configurazione npm con script per lint e format
 
 ## Dettagli implementativi
-- Gli eventi sono memorizzati con chiavi `agenda-events`, `agenda-tags` e `agenda-filters` su `localStorage`
+- Gli eventi sono memorizzati con chiavi `agenda-events`, `agenda-tags`, `agenda-filters` e `agenda-settings` su `localStorage`
 - Le funzioni di rendering aggiornano agenda, calendario e vista settimanale in modo coerente
 - Il drawer per i tag utilizza overlay e controlli ARIA (`aria-hidden`, `aria-live`) per migliorare accessibilità
 - I badge numerici nel calendario aprono un modale con focus gestito e ritorno al giorno di origine
+- Il calendario implementa il pattern ARIA grid con `role="grid"`, `role="gridcell"` e `aria-colindex`
+- Gli eventi ricorrenti vengono espansi dinamicamente con supporto per esclusioni di singole istanze
 
 ## Personalizzazione
 - Modifica `DEFAULT_TAG_COLOR` in `app.js` per cambiare il colore predefinito dei tag
 - Aggiorna le variabili CSS in `styles.css` per adattare palette e tipografia
 - Estendi `renderAgenda` o `renderUpcomingWeek` per integrare nuove viste (es. esportazione, stampa)
+
+## Script di sviluppo
+```bash
+npm run lint        # Controlla errori di linting
+npm run lint:fix    # Corregge automaticamente errori di linting
+npm run format      # Formatta il codice con Prettier
+npm run format:check # Verifica formattazione
+```
 
 ## Roadmap suggerita
 - Sincronizzazione opzionale con backend o servizi di calendario esterni
