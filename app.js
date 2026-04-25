@@ -67,7 +67,6 @@ const state = {
 
 let toastTimer = null;
 let searchDebounceTimer = null;
-let pendingUndo = null;
 
 // ── Initialization ──────────────────────────────────────────────
 checkSchemaVersion();

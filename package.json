@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint app.js",
-    "lint:fix": "eslint app.js --fix",
+    "lint": "eslint app.js sw.js",
+    "lint:fix": "eslint app.js sw.js --fix",
     "format": "prettier --write \"**/*.{js,css,html,json}\"",
     "format:check": "prettier --check \"**/*.{js,css,html,json}\""
   },
